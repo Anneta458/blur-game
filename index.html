@@ -6,13 +6,14 @@
     <title>Blur Remover</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body, html {
+        /* ВАЖНО: Фикс для "черного экрана" - растягиваем на 100% */
+        html, body {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000;
+            background-color: #000; /* Черный фон на случай если картинка не прогрузилась */
             display: flex;
             justify-content: center;
             align-items: center;
@@ -22,92 +23,112 @@
             position: relative;
             width: 100%;
             height: 100%;
-            max-width: 600px; /* Ограничение для десктопа */
+            /* Ограничиваем макс ширину, чтобы на ПК не было слишком широко */
+            max-width: 100%; 
+            max-height: 100%;
         }
 
-        /* Чистое изображение (снизу) */
         #clean-image {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: cover; /* Растягиваем картинку корректно */
             z-index: 1;
+            opacity: 0; /* Скрываем пока не загрузится */
+            transition: opacity 0.5s ease;
         }
 
-        /* Канвас (сверху) */
         canvas {
             position: absolute;
             top: 0;
             left: 0;
             z-index: 2;
-            touch-action: none; /* Важно для мобилок */
-            cursor: crosshair;
+            touch-action: none;
         }
 
-        /* Модальное окно */
+        /* Popup Styles */
         #popup {
             display: none;
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 80%;
-            background: rgba(20, 20, 20, 0.95);
+            width: 85%;
+            background: rgba(24, 24, 24, 0.95);
             border: 2px solid #ff0055;
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 20px;
+            padding: 25px 15px;
             text-align: center;
             color: white;
-            z-index: 10;
-            box-shadow: 0 0 20px rgba(255, 0, 85, 0.5);
-            font-family: sans-serif;
+            z-index: 100;
+            box-shadow: 0 0 30px rgba(255, 0, 85, 0.6);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         }
 
         .btn {
-            background: linear-gradient(45deg, #ff0055, #ff5500);
+            background: linear-gradient(90deg, #ff0055, #ff4400);
             border: none;
-            padding: 15px 30px;
+            padding: 16px 0;
             color: white;
             font-size: 18px;
-            font-weight: bold;
-            border-radius: 30px;
+            font-weight: 700;
+            border-radius: 12px;
             cursor: pointer;
-            margin-top: 15px;
+            margin-top: 20px;
             width: 100%;
+            text-transform: uppercase;
+            box-shadow: 0 4px 15px rgba(255, 68, 0, 0.4);
         }
     </style>
 </head>
 <body>
 
 <div id="container">
-    <img id="clean-image" src="https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?q=80&w=1000&auto=format&fit=crop" alt="Girl">
+    <img id="clean-image" src="girl_clean.jpg" alt="Girl">
     <canvas id="blur-canvas"></canvas>
     
     <div id="popup">
-        <h2>🔞 Оу, полегче!</h2>
-        <p>Хочешь увидеть полную версию без цензуры и блюра?</p>
+        <h2 style="margin: 0 0 10px; font-size: 24px;">🔞 Оу, полегче!</h2>
+        <p style="margin: 0; opacity: 0.8; font-size: 15px; line-height: 1.4;">Хочешь увидеть полную версию без цензуры?</p>
         <button class="btn" onclick="openSmartLink()">Вступить в VIP</button>
     </div>
 </div>
 
 <script>
     const tg = window.Telegram.WebApp;
-    tg.expand(); // Раскрыть на весь экран
+    tg.expand(); 
+    
+    // Ссылку лучше хардкодить сюда или брать из URL params
+    const VIP_LINK = "https://t.me/+vip_channel_link"; 
 
     const canvas = document.getElementById('blur-canvas');
-    const ctx = canvas.getContext('2d');
-    const container = document.getElementById('container');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const imgElement = document.getElementById('clean-image');
     const popup = document.getElementById('popup');
+    const container = document.getElementById('container');
     
     let isDrawing = false;
-    let clearedPixels = 0;
-    let totalPixels = 0;
     let gameEnded = false;
 
-    // Ссылка из конфига (в реальном проекте можно передавать через URL query params)
-    const VIP_LINK = "https://example.com/smartlink"; 
+    // 1. Инициализация после загрузки картинки
+    imgElement.onload = function() {
+        imgElement.style.opacity = 1; // Показываем картинку
+        resizeCanvas();
+    };
+    
+    // Если картинка закэширована
+    if (imgElement.complete) {
+        imgElement.style.opacity = 1;
+        resizeCanvas();
+    }
+    
+    // Фолбек, если картинки нет - рисуем черный квадрат, чтобы игра работала
+    imgElement.onerror = function() {
+        console.error("Image failed to load");
+        resizeCanvas();
+    }
 
     function resizeCanvas() {
         canvas.width = container.clientWidth;
@@ -116,36 +137,39 @@
     }
 
     function initBlurLayer() {
-        // Заливаем канвас "заблюренной" версией или просто пикселями
-        // Для простоты здесь используем полупрозрачный слой + эффект блюра
-        // В продакшене лучше отрисовать image через ctx.drawImage с filter = 'blur(20px)'
+        // Рисуем слой "цензуры"
+        // 1. Сначала копируем картинку
+        ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
         
-        const img = document.getElementById('clean-image');
+        // 2. Накладываем сильный блюр и затемнение поверх
+        ctx.globalCompositeOperation = 'source-over';
         
-        if (img.complete) {
-            drawBlur(img);
-        } else {
-            img.onload = () => drawBlur(img);
-        }
-    }
-
-    function drawBlur(img) {
-        ctx.filter = 'blur(20px) brightness(0.8)'; // CSS фильтры на канвасе
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        ctx.filter = 'none'; // Сброс фильтра
+        // Можно просто залить полупрозрачным цветом + текст, чтобы не грузить проц блюром
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Для надежности можно нарисовать текст "CENSORED"
-        ctx.font = "bold 40px Arial";
-        ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        // Текст
+        ctx.font = "bold 30px sans-serif";
+        ctx.fillStyle = "#ff0055";
         ctx.textAlign = "center";
         ctx.fillText("CENSORED", canvas.width/2, canvas.height/2);
-
-        // Считаем пиксели (грубая оценка общей площади)
-        totalPixels = canvas.width * canvas.height;
+        
+        ctx.font = "16px sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("Сотри пальцем", canvas.width/2, canvas.height/2 + 35);
     }
 
-    // --- Логика рисования (Стирание) ---
-    
+    // --- Рисование ---
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    }
+
     function startDraw(e) {
         if (gameEnded) return;
         isDrawing = true;
@@ -160,82 +184,55 @@
     function draw(e) {
         if (!isDrawing || gameEnded) return;
 
-        const rect = canvas.getBoundingClientRect();
-        const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-        const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
-
-        ctx.globalCompositeOperation = 'destination-out'; // Режим ластика
+        const pos = getPos(e);
+        
+        ctx.globalCompositeOperation = 'destination-out'; // Ластик
         ctx.beginPath();
-        ctx.arc(x, y, 40, 0, Math.PI * 2, false); // Размер кисти
+        ctx.arc(pos.x, pos.y, 35, 0, Math.PI * 2, false); // Размер кисти
         ctx.fill();
     }
 
-    // --- Подсчет прогресса ---
-    // Внимание: getImageData тяжелая операция. Не вызывать на каждый move.
-    // Вызываем только при endDraw (отпускании пальца).
-    
     function checkProgress() {
         if (gameEnded) return;
 
-        // Берем сэмплы (не каждый пиксель для скорости, а каждый 10-й)
-        // Или используем упрощенный каунтер based on strokes, но точнее через getImageData
-        
-        // Оптимизация: проверяем только центр или небольшое разрешение
-        // Для примера проверяем полноценно (может лагать на слабых устройствах)
-        
-        try {
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            let transparentPixels = 0;
-            
-            // data.length = width * height * 4 (rgba)
-            // Проверяем альфа канал (каждый 4-й элемент)
-            // Шаг += 400 (проверяем 1 пиксель из 100 для скорости)
-            for (let i = 3; i < data.length; i += 400) { 
-                if (data[i] < 10) { // Если прозрачность почти полная
-                    transparentPixels++;
-                }
+        // Оптимизация: проверяем только 1 пиксель из 200
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        let transparent = 0;
+        let total = 0;
+
+        for (let i = 3; i < data.length; i += 400) { // Пропускаем пиксели для скорости
+            total++;
+            if (data[i] < 50) { // Если прозрачность высокая
+                transparent++;
             }
-
-            const totalSampled = data.length / 400;
-            const percent = (transparentPixels / totalSampled) * 100;
-
-            console.log("Cleared:", percent.toFixed(2) + "%");
-
-            if (percent > 35) { // Порог 35%
-                triggerWin();
-            }
-        } catch (e) {
-            console.error(e);
         }
-    }
 
-    function triggerWin() {
-        gameEnded = true;
-        popup.style.display = "block";
-        tg.HapticFeedback.notificationOccurred('success'); // Вибрация
+        const percent = (transparent / total) * 100;
+        console.log("Percent:", percent);
+
+        if (percent > 25) { // 25% стерто
+            gameEnded = true;
+            popup.style.display = "block";
+            tg.HapticFeedback.notificationOccurred('success');
+        }
     }
 
     function openSmartLink() {
         tg.openLink(VIP_LINK);
-        // Или tg.close(), если нужно закрыть апп после клика
     }
 
-    // --- Event Listeners ---
     window.addEventListener('resize', resizeCanvas);
     
     // Mouse
     canvas.addEventListener('mousedown', startDraw);
-    canvas.addEventListener('mouseup', endDraw);
+    window.addEventListener('mouseup', endDraw);
     canvas.addEventListener('mousemove', draw);
     
     // Touch
     canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDraw(e); }, {passive: false});
-    canvas.addEventListener('touchend', (e) => { e.preventDefault(); endDraw(); }, {passive: false});
+    window.addEventListener('touchend', endDraw);
     canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); }, {passive: false});
-
-    // Init
-    resizeCanvas();
 
 </script>
 </body>
