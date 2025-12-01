@@ -43,17 +43,7 @@
             z-index: 1;
         }
 
-        #blur-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            z-index: 2;
-            filter: blur(25px) brightness(0.7);
-            transform: scale(1.1);
-        }
+        /* blur-layer удален, теперь мы рисуем блюр прямо на scratch-canvas */
 
         #scratch-canvas {
             position: absolute;
@@ -321,7 +311,8 @@
 
 <div id="container">
     <img id="clean-image" src="girl_clean.jpg" alt="">
-    <img id="blur-layer" src="girl_clean.jpg" alt="">
+    <img id="censored-source" src="girl_censored.jpg" alt="" style="display: none;">
+    
     <canvas id="scratch-canvas"></canvas>
     <canvas id="particles-canvas"></canvas>
     
@@ -367,7 +358,7 @@ const VIP_LINK = "https://t.me/+vip_channel_link";
 // Elements
 const container = document.getElementById('container');
 const cleanImg = document.getElementById('clean-image');
-const blurLayer = document.getElementById('blur-layer');
+const censoredImg = document.getElementById('censored-source');
 const scratchCanvas = document.getElementById('scratch-canvas');
 const particlesCanvas = document.getElementById('particles-canvas');
 const hint = document.getElementById('hint');
@@ -453,19 +444,39 @@ function resizeCanvas() {
 }
 
 function initScratchLayer() {
-    // Fill with solid color that will be "scratched off"
-    scratchCtx.fillStyle = '#000';
-    scratchCtx.fillRect(0, 0, scratchCanvas.width, scratchCanvas.height);
+    // Очищаем канвас
+    scratchCtx.clearRect(0, 0, scratchCanvas.width, scratchCanvas.height);
     
-    // Add some visual interest - gradient overlay
+    // Рисуем заблюренное фото с имитацией object-fit: cover
+    const w = scratchCanvas.width;
+    const h = scratchCanvas.height;
+    const imgW = censoredImg.naturalWidth;
+    const imgH = censoredImg.naturalHeight;
+    
+    if (imgW && imgH) {
+        const scale = Math.max(w / imgW, h / imgH);
+        const x = (w / 2) - (imgW / 2) * scale;
+        const y = (h / 2) - (imgH / 2) * scale;
+
+        scratchCtx.globalCompositeOperation = 'source-over';
+        scratchCtx.drawImage(censoredImg, x, y, imgW * scale, imgH * scale);
+    } else {
+        // Фоллбек, если картинка вдруг не прогрузилась
+        scratchCtx.fillStyle = '#111';
+        scratchCtx.fillRect(0, 0, w, h);
+    }
+
+    // Добавляем легкую виньетку для лучшей читаемости текста
     const gradient = scratchCtx.createRadialGradient(
-        scratchCanvas.width / 2, scratchCanvas.height / 2, 0,
-        scratchCanvas.width / 2, scratchCanvas.height / 2, scratchCanvas.width
+        w / 2, h / 2, 0,
+        w / 2, h / 2, w
     );
-    gradient.addColorStop(0, 'rgba(255, 0, 110, 0.1)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+    
+    scratchCtx.globalCompositeOperation = 'source-over';
     scratchCtx.fillStyle = gradient;
-    scratchCtx.fillRect(0, 0, scratchCanvas.width, scratchCanvas.height);
+    scratchCtx.fillRect(0, 0, w, h);
 }
 
 // Touch handlers
@@ -534,7 +545,7 @@ function drawAt(e) {
     
     const pos = getPos(e);
     
-    // Draw scratch line
+    // Draw scratch line (стираем блюр слой)
     scratchCtx.globalCompositeOperation = 'destination-out';
     scratchCtx.lineCap = 'round';
     scratchCtx.lineJoin = 'round';
@@ -627,12 +638,7 @@ function endGame() {
         tg.HapticFeedback.notificationOccurred('success');
     }
     
-    // Animate blur layer out
-    blurLayer.style.transition = 'filter 0.8s ease, opacity 0.8s ease';
-    blurLayer.style.filter = 'blur(0px) brightness(1)';
-    blurLayer.style.opacity = '0';
-    
-    // Fade out scratch canvas
+    // Fade out scratch canvas fully
     scratchCanvas.style.transition = 'opacity 0.5s ease';
     scratchCanvas.style.opacity = '0';
     
@@ -659,11 +665,20 @@ function openVIP() {
 
 function closePopup() {
     popupOverlay.classList.remove('visible');
+    
+    // Закрываем WebApp при нажатии на крестик
+    if (tg) {
+        tg.close();
+    } else {
+        // Фоллбек для теста в браузере
+        console.log("WebApp closed");
+        location.reload();
+    }
 }
 
 // Image loading
 let imagesLoaded = 0;
-const totalImages = 2;
+const totalImages = 2; // Ждем и чистое, и заблюренное фото
 
 function onImageLoad() {
     imagesLoaded++;
@@ -674,11 +689,11 @@ function onImageLoad() {
 }
 
 cleanImg.onload = onImageLoad;
-blurLayer.onload = onImageLoad;
+censoredImg.onload = onImageLoad;
 
 // If cached
 if (cleanImg.complete) onImageLoad();
-if (blurLayer.complete) onImageLoad();
+if (censoredImg.complete) onImageLoad();
 
 // Fallback timeout
 setTimeout(() => {
